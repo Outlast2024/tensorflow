@@ -31,7 +31,7 @@ limitations under the License.
 #include "mlir/Support/LogicalResult.h"  // from @llvm-project
 #include "mlir/Support/TypeID.h"  // from @llvm-project
 #include "mlir/Transforms/GreedyPatternRewriteDriver.h"  // from @llvm-project
-#include "tensorflow/compiler/mlir/lite/quantization/ir/QuantOps.h"
+#include "tensorflow/compiler/mlir/quantization/common/ir/QuantOps.h"
 #include "tensorflow/compiler/mlir/quantization/common/quantization_lib/quantization_utils.h"
 #include "tensorflow/compiler/mlir/tensorflow/ir/tf_ops.h"
 
@@ -55,8 +55,7 @@ struct LegalizeTFToQuant
   void runOnOperation() override;
 
   void getDependentDialects(DialectRegistry &registry) const override {
-    registry.insert<quant::QuantDialect,
-                    quantfork::QuantizationForkDialect>();
+    registry.insert<quant::QuantDialect, quant::ir::TFQuantDialect>();
   }
 
   StringRef getArgument() const final {
@@ -108,7 +107,7 @@ struct InsertQuantOpsAfterTFFakeQuantOp
                                 PatternRewriter &rewriter) const override {
     // We don't want to insert quantize/dequantize if the quantize op exists.
     auto res = tf_op.getOutputs();
-    if (!res.hasOneUse() || isa<quantfork::QuantizeCastOp>(*res.user_begin()))
+    if (!res.hasOneUse() || isa<quant::ir::QuantizeCastOp>(*res.user_begin()))
       return failure();
 
     // Extract the min/max constant values from the operands. We also consider
@@ -150,9 +149,9 @@ struct InsertQuantOpsAfterTFFakeQuantOp
     // dequantize ops, and insert them between the tf.FakeQuantWithMinMaxVarsOp
     // and its users.
     Value value = tf_op.getOutputs();
-    auto quantize = rewriter.create<quantfork::QuantizeCastOp>(
+    auto quantize = rewriter.create<quant::ir::QuantizeCastOp>(
         tf_op.getLoc(), qtype.getValue(), value);
-    auto dequantize = rewriter.create<quantfork::DequantizeCastOp>(
+    auto dequantize = rewriter.create<quant::ir::DequantizeCastOp>(
         tf_op.getLoc(), res_type, quantize.getResult());
     value.replaceAllUsesWith(dequantize);
     quantize.getOperation()->replaceUsesOfWith(dequantize, value);

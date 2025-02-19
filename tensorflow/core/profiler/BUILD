@@ -13,7 +13,10 @@ package(
 
 package_group(
     name = "friends",
-    includes = ["//tensorflow:internal"],
+    includes = [
+        "//tensorflow:internal",
+        "@org_xprof//xprof/...",
+    ],
 )
 
 package_group(

@@ -66,6 +66,11 @@ const Shape& TupleShape(const Shape& shape, int index) {
   return shape.IsTuple() ? shape.tuple_shapes(index) : shape;
 }
 
+bool IsLeaf(const HloInstruction* instr) {
+  return HloPredicateIsOp<HloOpcode::kIota, HloOpcode::kConstant,
+                          HloOpcode::kParameter>(instr);
+}
+
 std::vector<IndexingMapSet> ComputeOperandIndexingMaps(
     const HloInstruction* instr, mlir::MLIRContext* mlir_context) {
   std::vector<IndexingMapSet> indexing_maps_per_operand;
@@ -107,7 +112,7 @@ EpilogueSpecification EpilogueSpecification::FromIdentityIndexing(
 std::string PartitionedComputation::Subgraph::ToString(int indentation) const {
   std::string indent(indentation, ' ');
   std::ostringstream ss;
-  ss << indent << "SUBGRAPH " << name << " {\n";
+  ss << indent << "SUBGRAPH" << (is_leaf ? " LEAF " : " ") << name << " {\n";
   for (auto* instr :
        (*instructions.begin())->parent()->MakeInstructionPostOrder()) {
     if (!instructions.contains(instr)) continue;
@@ -179,6 +184,8 @@ struct HloSubgraphData {
   SubgraphId subgraph_id = -1;
   // Whether the instruction is a root of the subgraph.
   bool is_root = false;
+  // Whether the instruction is a leaf of the graph.
+  bool is_leaf = false;
 };
 
 PartitionedComputation::PartitionedComputation(
@@ -210,6 +217,7 @@ PartitionedComputation::PartitionedComputation(
     if (instr_subgraph_data.is_root) {
       instr_subgraph_data.subgraph_id = subgraph_count++;
       instr_subgraph_data.indexings.clear();
+      instr_subgraph_data.is_leaf = IsLeaf(instr);
     } else {
       instr_subgraph_data.subgraph_id =
           *instr_subgraph_data.user_subgraph_ids.begin();
@@ -251,8 +259,12 @@ PartitionedComputation::PartitionedComputation(
     std::vector<const HloInstruction*> roots;
     std::vector<IndexingMap> root_indexing;
     const xla::Shape* first_root_shape = nullptr;
+    bool is_leaf = false;
     for (auto* instruction : instructions) {
-      if (id_to_subgraph_data[instr_to_id[instruction]].is_root) {
+      const HloSubgraphData& instr_subgraph_data =
+          id_to_subgraph_data[instr_to_id[instruction]];
+      if (instr_subgraph_data.is_root) {
+        is_leaf = instr_subgraph_data.is_leaf;
         roots.push_back(instruction);
         if (first_root_shape) {
           CHECK(!instruction->shape().IsTuple())
@@ -291,7 +303,8 @@ PartitionedComputation::PartitionedComputation(
         /* .instructions = */ {instructions.begin(), instructions.end()},
         /* .roots = */ std::move(roots),
         /* .index_ranges = */ std::move(ranges),
-        /* .root_indexing = */ std::move(root_indexing)});
+        /* .root_indexing = */ std::move(root_indexing),
+        /* .is_leaf = */ is_leaf});
   }
 
   for (const auto& subgraph : subgraphs_) {
@@ -472,9 +485,12 @@ mlir::func::FuncOp CreateSubgraphMlirFunction(
     }
   }
   auto ty = b.getFunctionType(parameter_types, result_types);
-  auto func_op = b.create<mlir::func::FuncOp>(
-      subgraph.name, ty,
-      /*attrs=*/llvm::ArrayRef<mlir::NamedAttribute>{}, arg_attrs);
+  llvm::SmallVector<mlir::NamedAttribute> func_attrs;
+  if (subgraph.is_leaf) {
+    func_attrs.emplace_back(b.getNamedAttr("xla.leaf", b.getBoolAttr(true)));
+  }
+  auto func_op =
+      b.create<mlir::func::FuncOp>(subgraph.name, ty, func_attrs, arg_attrs);
   // Needed so that the function can potentially be inlined in-place.
   func_op.setPrivate();
   return func_op;

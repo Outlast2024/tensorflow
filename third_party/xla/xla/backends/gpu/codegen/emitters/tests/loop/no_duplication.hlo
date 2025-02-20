@@ -24,3 +24,7 @@ ENTRY entry_computation {
 }
 // CHECK-COUNT-4: arith.add
 // CHECK-NOT: arith.add
+
+// CHECK: func.func private @fusion_param
+// CHECK-SAME: attributes {llvm.linkage = #llvm.linkage<internal>,
+// CHECK-SAME:             xla.leaf = true}

@@ -101,7 +101,7 @@ TEST_F(ComputationPartitionerTest, PartitionDiamonds) {
         %slice0.2 = f32[5]{0} slice(f32[6]{0} %param), slice={[1:6]}
         ROOT %add0 = f32[5]{0} add(f32[5]{0} %slice0.1, f32[5]{0} %slice0.2)
       }
-      SUBGRAPH fused_computation_param {
+      SUBGRAPH LEAF fused_computation_param {
         ROOT %param = f32[6]{0} parameter(0)
       })";
   EXPECT_EQ(computation.ToString(6), kExpected);

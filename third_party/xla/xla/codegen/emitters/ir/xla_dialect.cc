@@ -14,8 +14,10 @@ limitations under the License.
 ==============================================================================*/
 
 #include "llvm/ADT/TypeSwitch.h"  // IWYU pragma: keep
+#include "mlir/IR/BuiltinAttributes.h"
 #include "mlir/IR/DialectImplementation.h"  // IWYU pragma: keep
 #include "mlir/IR/OpImplementation.h"  // IWYU pragma: keep
+#include "mlir/Support/LLVM.h"
 #include "mlir/Transforms/InliningUtils.h"
 #include "xla/codegen/emitters/ir/xla_ops.h"
 
@@ -56,33 +58,10 @@ struct XlaInlinerInterface : public mlir::DialectInlinerInterface {
     if (!region) {
       return false;
     }
-
-    // If callee and caller call the same third function, inline. We have no
-    // guarantee that the indices are the same, but there is a good chance they
-    // are (or if the callee gets inlined as well, there will be CSE
-    // opportunities).
-    // This is duct tape to work around the limitations of our partitioner.
-    // Ideally, the partitioner would be aware of the actual indexing and create
-    // the partitions based on it (i.e., the case where the indices are the same
-    // would never happen).
-    llvm::SmallDenseSet<llvm::StringRef> callee_calls;
-    for (auto call : region->getOps<PureCallOp>()) {
-      callee_calls.insert(call.getCallee());
-    }
-    for (auto call : call->getParentRegion()->getOps<PureCallOp>()) {
-      if (callee_calls.contains(call.getCallee())) {
-        return true;
-      }
-    }
-
-    constexpr int kMaxOperationsToInline = 8;
-    int num_ops = 0;
-    region->front().walk([&](mlir::Operation* op) { ++num_ops; });
-
-    // Don't inline functions that are called more than once and contain more
-    // than one call themselves.
-    return num_ops <= kMaxOperationsToInline;
+    auto is_leaf = func_op->getAttr("xla.leaf");
+    return is_leaf && mlir::cast<mlir::BoolAttr>(is_leaf).getValue();
   }
+
   // Returns true if the given operation 'op', that is registered to this
   // dialect, can be inlined into the given region, false otherwise.
   // 'wouldBeCloned' is set to true if the given 'op' is set to be cloned

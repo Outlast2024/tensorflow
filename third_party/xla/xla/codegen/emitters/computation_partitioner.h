@@ -102,6 +102,10 @@ class PartitionedComputation {
     // Maps from raw indices to root indices.
     std::vector<IndexingMap> root_indexing;
 
+    // Indicates that the subgraph has no compute, i.e. it is a parameter or
+    // constant and can be inlined.
+    bool is_leaf = false;
+
     // For values that are function arguments (not function calls), stores
     // the mapping from value to the starting argument index. The arguments
     // always come after the tensor parameters and output indices; the indices

@@ -33,6 +33,7 @@
 #include "tensorflow/lite/experimental/litert/c/litert_tensor_buffer.h"
 #include "tensorflow/lite/experimental/litert/c/litert_tensor_buffer_requirements.h"
 #include "tensorflow/lite/experimental/litert/cc/litert_expected.h"
+#include "tensorflow/lite/experimental/litert/cc/litert_macros.h"
 #include "tensorflow/lite/experimental/litert/cc/litert_tensor_buffer.h"
 #include "tensorflow/lite/experimental/litert/cc/litert_tensor_buffer_requirements.h"
 #include "tensorflow/lite/experimental/litert/core/model/model.h"
@@ -50,91 +51,116 @@ using ::testing::ElementsAre;
 using ::testing::FloatNear;
 using ::testing::Pointwise;
 
+// Creates input buffers for the given LiteRtCompiledModelT by leveraging
+// TensorBufferRequirements.
+Expected<std::vector<LiteRtTensorBuffer>> CreateInputBuffers(
+    LiteRtModel& model, absl::string_view signature_key,
+    LiteRtCompiledModelT& compiled_model) {
+  LITERT_ASSIGN_OR_RETURN(LiteRtSubgraph subgraph,
+                          LookupSubgraph(*model, signature_key));
+
+  std::vector<LiteRtTensorBuffer> input_buffers;
+  input_buffers.reserve(subgraph->NumInputs());
+  for (int i = 0; i < subgraph->NumInputs(); ++i) {
+    // Get buffer requirements and tensor at index i.
+    LITERT_ASSIGN_OR_RETURN(
+        const LiteRtTensorBufferRequirements& requirements_at_index,
+        compiled_model.GetInputBufferRequirements(signature_key, i));
+    const LiteRtTensor& tensor = subgraph->Inputs().at(i);
+
+    // Get buffer type, tensor type and buffer size.
+    const LiteRtTensorBufferType& buffer_type =
+        requirements_at_index->SupportedBufferTypes().at(0);
+    const LiteRtRankedTensorType& ranked_tensor_type =
+        tensor->Type().second.ranked_tensor_type;
+    size_t bytes = requirements_at_index->BufferSize();
+
+    LiteRtTensorBuffer input_buffer;
+    LITERT_RETURN_IF_ERROR(LiteRtCreateManagedTensorBuffer(
+        buffer_type, &ranked_tensor_type, bytes, &input_buffer));
+    input_buffers.push_back(std::move(input_buffer));
+  }
+  return input_buffers;
+}
+
 // Creates input buffers for the given LiteRtTensorBufferType and size.
 Expected<std::vector<LiteRtTensorBuffer>> CreateInputBuffers(
     LiteRtModel& model, absl::string_view signature_key,
     LiteRtTensorBufferType buffer_type, size_t bytes) {
+  LITERT_ASSIGN_OR_RETURN(LiteRtSubgraph subgraph,
+                          LookupSubgraph(*model, signature_key));
+
   std::vector<LiteRtTensorBuffer> input_buffers;
-  auto* subgraph = *LookupSubgraph(*model, signature_key);
-  auto& input_tensors = subgraph->Inputs();
-  const size_t num_inputs = subgraph->NumInputs();
-  input_buffers.reserve(num_inputs);
-  for (int i = 0; i < num_inputs; ++i) {
-    const auto& ranked_tensor_type =
-        input_tensors[i]->Type().second.ranked_tensor_type;
+  input_buffers.reserve(subgraph->NumInputs());
+  for (int i = 0; i < subgraph->NumInputs(); ++i) {
+    const LiteRtTensor& tensor = subgraph->Inputs().at(i);
+
+    // Instead of using TensorBufferRequirements, we directly create
+    // buffers using buffer_type and bytes.
+    const LiteRtRankedTensorType& ranked_tensor_type =
+        tensor->Type().second.ranked_tensor_type;
     LiteRtTensorBuffer input_buffer;
-    if (auto status = LiteRtCreateManagedTensorBuffer(
-            buffer_type, &ranked_tensor_type, bytes, &input_buffer);
-        status != kLiteRtStatusOk) {
-      return Unexpected(status, "Failed to create input tensor buffer");
-    }
-    input_buffers.push_back(input_buffer);
+    LITERT_RETURN_IF_ERROR(LiteRtCreateManagedTensorBuffer(
+        buffer_type, &ranked_tensor_type, bytes, &input_buffer));
+    input_buffers.push_back(std::move(input_buffer));
   }
-  return std::move(input_buffers);
+  return input_buffers;
 }
 
-// Creates input buffers for the given LiteRtCompiledModelT by leveraging
+// Creates output buffers for the given LiteRtCompiledModelT by leveraging
 // TensorBufferRequirements.
-Expected<std::vector<LiteRtTensorBuffer>> CreateInputBuffers(
-    LiteRtModel& model, LiteRtCompiledModelT& compiled_model,
-    absl::string_view signature_key) {
-  auto litert_input_buffer_requirements =
-      compiled_model.GetInputBufferRequirements(signature_key, 0);
-  if (!litert_input_buffer_requirements.HasValue()) {
-    return Unexpected(kLiteRtStatusErrorRuntimeFailure,
-                      litert_input_buffer_requirements.Error().Message());
-  }
-  TensorBufferRequirements input_buffer_requirements =
-      TensorBufferRequirements(*litert_input_buffer_requirements,
-                               /*owned=*/false);
-  LiteRtTensorBufferType tensor_buffer_type =
-      input_buffer_requirements.SupportedTypes()->at(0);
+Expected<std::vector<LiteRtTensorBuffer>> CreateOutputBuffers(
+    LiteRtModel& model, absl::string_view signature_key,
+    LiteRtCompiledModelT& compiled_model) {
+  LITERT_ASSIGN_OR_RETURN(LiteRtSubgraph subgraph,
+                          LookupSubgraph(*model, signature_key));
 
-  return CreateInputBuffers(model, signature_key, tensor_buffer_type,
-                            input_buffer_requirements.BufferSize().Value());
+  std::vector<LiteRtTensorBuffer> output_buffers;
+  output_buffers.reserve(subgraph->NumOutputs());
+  for (int i = 0; i < subgraph->NumOutputs(); ++i) {
+    // Get tensor and buffer requirements at index i.
+    LITERT_ASSIGN_OR_RETURN(
+        const LiteRtTensorBufferRequirements& requirements_at_index,
+        compiled_model.GetOutputBufferRequirements(signature_key, i));
+    const LiteRtTensor& tensor = subgraph->Outputs().at(i);
+
+    // Get buffer type, tensor type and buffer size.
+    const LiteRtTensorBufferType& buffer_type =
+        requirements_at_index->SupportedBufferTypes().at(0);
+    const LiteRtRankedTensorType& ranked_tensor_type =
+        tensor->Type().second.ranked_tensor_type;
+    size_t bytes = requirements_at_index->BufferSize();
+
+    LiteRtTensorBuffer output_buffer;
+    LITERT_RETURN_IF_ERROR(LiteRtCreateManagedTensorBuffer(
+        buffer_type, &ranked_tensor_type, bytes, &output_buffer));
+    output_buffers.push_back(std::move(output_buffer));
+  }
+  return output_buffers;
 }
 
 // Creates output buffers for the given LiteRtTensorBufferType and size.
 Expected<std::vector<LiteRtTensorBuffer>> CreateOutputBuffers(
     LiteRtModel& model, absl::string_view signature_key,
     LiteRtTensorBufferType buffer_type, size_t bytes) {
-  std::vector<LiteRtTensorBuffer> output_buffers;
-  auto* subgraph = *LookupSubgraph(*model, signature_key);
-  auto& output_tensors = subgraph->Outputs();
-  size_t num_outputs = subgraph->NumOutputs();
-  output_buffers.reserve(num_outputs);
-  for (int i = 0; i < num_outputs; ++i) {
-    auto ranked_tensor_type =
-        output_tensors[i]->Type().second.ranked_tensor_type;
-    LiteRtTensorBuffer output_buffer;
-    if (auto status = LiteRtCreateManagedTensorBuffer(
-            buffer_type, &ranked_tensor_type, bytes, &output_buffer);
-        status != kLiteRtStatusOk) {
-      return Unexpected(status, "Failed to create output tensor buffer");
-    }
-    output_buffers.push_back(output_buffer);
-  }
-  return std::move(output_buffers);
-}
+  LITERT_ASSIGN_OR_RETURN(LiteRtSubgraph subgraph,
+                          LookupSubgraph(*model, signature_key));
 
-// Creates output buffers for the given LiteRtCompiledModelT by leveraging
-// TensorBufferRequirements.
-Expected<std::vector<LiteRtTensorBuffer>> CreateOutputBuffers(
-    LiteRtModel& model, LiteRtCompiledModelT& compiled_model,
-    absl::string_view signature_key) {
-  auto litert_output_buffer_requirements =
-      compiled_model.GetOutputBufferRequirements(signature_key, 0);
-  if (!litert_output_buffer_requirements.HasValue()) {
-    return Unexpected(kLiteRtStatusErrorRuntimeFailure,
-                      litert_output_buffer_requirements.Error().Message());
+  std::vector<LiteRtTensorBuffer> output_buffers;
+  output_buffers.reserve(subgraph->NumOutputs());
+  for (int i = 0; i < subgraph->NumOutputs(); ++i) {
+    const LiteRtTensor& tensor = subgraph->Outputs().at(i);
+
+    // Instead of using TensorBufferRequirements, we directly create
+    // buffers using buffer_type and bytes.
+    const LiteRtRankedTensorType& ranked_tensor_type =
+        tensor->Type().second.ranked_tensor_type;
+    LiteRtTensorBuffer output_buffer;
+    LITERT_RETURN_IF_ERROR(LiteRtCreateManagedTensorBuffer(
+        buffer_type, &ranked_tensor_type, bytes, &output_buffer));
+    output_buffers.push_back(std::move(output_buffer));
   }
-  TensorBufferRequirements output_buffer_requirements =
-      TensorBufferRequirements(*litert_output_buffer_requirements,
-                               /*owned=*/false);
-  LiteRtTensorBufferType tensor_buffer_type =
-      output_buffer_requirements.SupportedTypes()->at(0);
-  return CreateOutputBuffers(model, signature_key, tensor_buffer_type,
-                             output_buffer_requirements.BufferSize().Value());
+  return output_buffers;
 }
 
 TEST(CompiledModelTest, Basic) {
@@ -204,13 +230,14 @@ TEST(CompiledModelTest, Basic) {
   EXPECT_THAT(output_buffer_types,
               ElementsAre(kLiteRtTensorBufferTypeHostMemory));
 
-  // Create and fill input and output LiteRtTensorBuffers.
+  // Create and fill input and output LiteRtTensorBuffers. Buffers are
+  // created to match CompiledModel's TensorBufferRequirements.
   LITERT_ASSERT_OK_AND_ASSIGN(
       std::vector<LiteRtTensorBuffer> input_buffers,
-      CreateInputBuffers(model, *compiled_model, signature_key));
+      CreateInputBuffers(model, signature_key, *compiled_model));
   LITERT_ASSERT_OK_AND_ASSIGN(
       std::vector<LiteRtTensorBuffer> output_buffers,
-      CreateOutputBuffers(model, *compiled_model, signature_key));
+      CreateOutputBuffers(model, signature_key, *compiled_model));
 
   LiteRtTensorBuffer& input_0_buffer = input_buffers[0];
   {
@@ -324,7 +351,8 @@ TEST(CompiledModelTest, UseAhwbBuffer) {
   EXPECT_THAT(output_buffer_types,
               ElementsAre(kLiteRtTensorBufferTypeHostMemory));
 
-  // Create and fill input and output buffers.
+  // Create and fill input and output buffers. CompiledModel's
+  // TensorBufferRequirements expect host memory,but we create AHWB buffers.
   LITERT_ASSERT_OK_AND_ASSIGN(
       std::vector<LiteRtTensorBuffer> input_buffers,
       CreateInputBuffers(model, signature_key, kLiteRtTensorBufferTypeAhwb,
@@ -455,7 +483,8 @@ TEST(CompiledModelTest, UseOpenCLBuffer) {
   EXPECT_THAT(output_buffer_types,
               ElementsAre(kLiteRtTensorBufferTypeHostMemory));
 
-  // Create and fill input and output buffers.
+  // Create and fill input and output buffers. CompiledModel's
+  // TensorBufferRequirements expect host memory,but we create OpenCL buffers.
   LITERT_ASSERT_OK_AND_ASSIGN(
       std::vector<LiteRtTensorBuffer> input_buffers,
       CreateInputBuffers(model, signature_key, kLiteRtTensorBufferTypeOpenCl,

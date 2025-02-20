@@ -48,3 +48,5 @@ def xla_test_friend_package_group(name):
         name = name,
         packages = ["//..."],
     )
+
+XLA_STREAM_EXECUTOR_LEGACY_USERS = []

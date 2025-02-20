@@ -576,6 +576,7 @@ bzl_library(
     srcs = ["tsl.bzl"],
     visibility = ["//visibility:public"],
     deps = [
+        ":tsl_core_bzl",
         "//third_party/compute_library:build_defs_bzl",
         "//xla/tsl/mkl:build_defs_bzl",
         "//xla/tsl/platform:rules_cc_bzl",
@@ -585,6 +586,12 @@ bzl_library(
         "@local_config_tensorrt//:build_defs_bzl",
         "@local_tsl//third_party/py/rules_pywrap:pywrap_bzl",
     ],
+)
+
+bzl_library(
+    name = "tsl_core_bzl",
+    srcs = ["tsl_core.bzl"],
+    visibility = ["//visibility:public"],
 )
 
 bzl_library(

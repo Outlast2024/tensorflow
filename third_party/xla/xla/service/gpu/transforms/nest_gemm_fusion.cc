@@ -132,10 +132,10 @@ absl::Status FuseInstructionsForConsumer(
 // Implementation for AnnotateDotLhs/RhsNestedFusion().
 absl::Status AnnotateDotOperandNestedFusionImpl(
     HloFusionInstruction& nested_fusion, const HloDotInstruction& dot,
-    const TritonGemmConfig& config,
+    const TritonGemmConfig& _unused_config,
     absl::Span<const int64_t> contracting_dimensions,  // Must be single element
-    absl::Span<const int64_t> batch_dimensions, int64_t contracting_dim_size,
-    int64_t non_contracting_dim_size) {
+    absl::Span<const int64_t> batch_dimensions, int64_t contracting_tile_size,
+    int64_t _unused_non_contracting_tile_size) {
   if (contracting_dimensions.size() != 1) {
     return absl::InternalError(
         absl::StrCat("Expected a single lhs contracting dimension but got ",
@@ -153,11 +153,10 @@ absl::Status AnnotateDotOperandNestedFusionImpl(
                      non_contracting_dimensions.size()));
   }
 
-  // We have a single contracting dimension, and a single non-contracting
-  // dimension. All the other output tile sizes are set to 1.
-  std::vector<int64_t> output_tile_sizes(dot.operand(0)->shape().rank(), 1);
-  output_tile_sizes[contracting_dimensions[0]] = contracting_dim_size;
-  output_tile_sizes[non_contracting_dimensions[0]] = non_contracting_dim_size;
+  // We are only interested in the contracting dimension (symbol K) of the
+  // nested fusion. Tiling of other dimensions is handled by the user.
+  // This way we avoid duplication and potential contradictions.
+  std::vector<int64_t> output_tile_sizes(1, contracting_tile_size);
 
   BlockLevelParameters block_level_parameters;
   block_level_parameters.output_tile_sizes = {std::move(output_tile_sizes)};

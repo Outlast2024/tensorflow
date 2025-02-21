@@ -25,6 +25,7 @@ import random
 import re
 import struct
 import sys
+from typing import Type, TypeVar
 
 import flatbuffers
 
@@ -453,3 +454,46 @@ def count_resource_variables(model):
       if builtin_code == schema_fb.BuiltinOperator.VAR_HANDLE:
         unique_shared_names.add(op.builtinOptions.sharedName)
   return len(unique_shared_names)
+
+
+OptsT = TypeVar('OptsT')
+
+
+def get_options_as(
+    op: schema_fb.Operator, opts_type: Type[OptsT]
+) -> OptsT | None:
+  """Get the options of an operator as the specified type.
+
+  Requested type must be an object-api type (ends in 'T').
+
+  Args:
+    op: The operator to get the options from.
+    opts_type: The type of the options to get.
+
+  Returns:
+    The options as the specified type, or None if the options are not of the
+    specified type.
+
+  Raises:
+    ValueError: If the specified type is not a valid options type.
+  """
+  err = ValueError(f'Unsupported options type: {opts_type}')
+  type_name: str = opts_type.__name__
+  if not type_name.endswith('T'):
+    raise err
+  base_type_name = type_name.removesuffix('T')
+  if hasattr(schema_fb.BuiltinOptions2, base_type_name):
+    enum_val = getattr(schema_fb.BuiltinOptions2, base_type_name)
+    opts_creator = schema_fb.BuiltinOptions2Creator
+    raw_ops = op.BuiltinOptions2()
+    actual_enum_val = op.BuiltinOptions2Type()
+  elif hasattr(schema_fb.BuiltinOptions, base_type_name):
+    enum_val = getattr(schema_fb.BuiltinOptions, base_type_name)
+    opts_creator = schema_fb.BuiltinOptionsCreator
+    raw_ops = op.BuiltinOptions()
+    actual_enum_val = op.BuiltinOptionsType()
+  else:
+    raise err
+  if raw_ops is None or actual_enum_val != enum_val:
+    return None
+  return opts_creator(enum_val, raw_ops)

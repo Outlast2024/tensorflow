@@ -28,6 +28,8 @@ limitations under the License.
 
 namespace xla::gpu {
 
+// Encapsulates expressions for size and stride and the corresponding
+// constraints on the dimension values that need to be satisfied.
 struct SizeAndStrideExpression {
   mlir::AffineExpr size;
   mlir::AffineExpr stride;
@@ -48,6 +50,14 @@ struct SizeAndStrideExpression {
       : size(size), stride(stride), constraints(std::move(constraints)) {}
 };
 
+// strided_indexing` should be an AffineExpr involving dimension ids between 0
+// and `dimension_intervals.size() - 1`, and symbol ids between 0 and
+// `symbol_intervals.size() - 1`. `dimension_intervals` specifies the valid
+// range of values for the different dimension ids, `symbol_intervals` specifies
+// the valid range of values for the different symbol ids. This method attempts
+// to linearize the expression into `stride * index` and computes expressions
+// for stride and tile size together with constraints on the values for the
+// dimensions which need to be satisfied to make the expressions valid.
 std::optional<SizeAndStrideExpression> ExtractSizeAndStride(
     mlir::AffineExpr strided_indexing,
     absl::Span<Interval const> dimension_intervals,
